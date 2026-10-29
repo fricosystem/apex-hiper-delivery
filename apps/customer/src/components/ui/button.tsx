@@ -80,7 +80,7 @@ export function Button({
       ) : (
         <View style={styles.row}>
           {icon}
-          <Text variant="bodyStrong" color={palette.fg} style={trailing ? styles.grow : undefined}>
+          <Text variant="bodyStrong" color={palette.fg} style={trailing ? styles.grow : styles.center}>
             {title}
           </Text>
           {trailing ? (
@@ -112,5 +112,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   grow: { flex: 1 },
+  center: { textAlign: 'center', flexShrink: 1 },
   disabled: { opacity: 0.5 },
 });

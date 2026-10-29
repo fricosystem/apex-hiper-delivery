@@ -1,17 +1,36 @@
-import { Alert, Platform } from 'react-native';
+/**
+ * Diálogos do app (confirmação e aviso), desenhados pelo próprio app em vez
+ * de alert/confirm do navegador, que nem sempre aparecem na web.
+ */
 
-/** Pergunta de sim ou não que funciona no celular e no navegador. */
+export interface DialogRequest {
+  title: string;
+  message?: string;
+  /** Texto do botão principal; sem cancelar quando é só um aviso. */
+  ok: string;
+  cancel: boolean;
+  resolve: (ok: boolean) => void;
+}
+
+type Listener = (request: DialogRequest) => void;
+let listener: Listener | null = null;
+
+export function setDialogListener(fn: Listener | null): void {
+  listener = fn;
+}
+
+function open(request: Omit<DialogRequest, 'resolve'>): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!listener) return resolve(false);
+    listener({ ...request, resolve });
+  });
+}
+
+/** Pergunta de sim ou não. */
 export function confirm(title: string, message: string, ok = 'Continuar'): Promise<boolean> {
-  if (Platform.OS === 'web') return Promise.resolve(window.confirm(`${title}\n\n${message}`));
-  return new Promise((resolve) =>
-    Alert.alert(title, message, [
-      { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-      { text: ok, style: 'destructive', onPress: () => resolve(true) },
-    ]),
-  );
+  return open({ title, message, ok, cancel: true });
 }
 
 export function notify(title: string, message?: string): void {
-  if (Platform.OS === 'web') window.alert(message ? `${title}\n\n${message}` : title);
-  else Alert.alert(title, message);
+  void open({ title, message, ok: 'Entendi', cancel: false });
 }

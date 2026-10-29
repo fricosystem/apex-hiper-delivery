@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { DialogHost } from '@/components/dialog-host';
 import { AuthProvider } from '@/state/auth';
 import { CartProvider } from '@/state/cart';
 import { useTheme } from '@/theme/use-theme';
@@ -53,6 +54,7 @@ export default function RootLayout() {
                 <Stack.Screen name="entrar" options={{ presentation: 'modal', title: 'Entrar' }} />
                 <Stack.Screen name="perfil" options={{ title: 'Meus dados' }} />
               </Stack>
+              <DialogHost />
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>

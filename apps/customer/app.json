@@ -30,7 +30,12 @@
       "lang": "pt-BR"
     },
     "plugins": [
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "asyncRoutes": false
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -42,7 +47,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Usamos sua localização para sugerir o endereço de entrega."
+          "locationWhenInUsePermission": "Usamos sua localiza\u00e7\u00e3o para sugerir o endere\u00e7o de entrega."
         }
       ],
       "@maplibre/maplibre-react-native"
