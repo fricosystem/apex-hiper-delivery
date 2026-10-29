@@ -270,6 +270,28 @@ service cloud.firestore {
         allow read: if hasRole(tenantId, ['owner']);
         allow write: if false;
       }
+
+      // ---------- Pedidos do cliente ----------
+
+      // Criados só pela Function createOrder, que recalcula preço e frete.
+      // A leitura do cliente dono fica na regra de grupo de coleção abaixo.
+      match /orders/{orderId} {
+        allow read: if memberOf(tenantId);
+        allow write: if false;
+
+        // Posição do entregador durante a entrega.
+        match /live/{docId} {
+          allow read: if memberOf(tenantId)
+            || (signedIn() && resource.data.customerUid == uid());
+          allow write: if false;
+        }
+      }
+
+      // Categorias visíveis na vitrine, geradas pela Function syncPublicCategories.
+      match /publicCategories/{categoryId} {
+        allow read: if true;
+        allow write: if false;
+      }
     }
 
     // ---------- Fora das empresas ----------
@@ -284,6 +306,12 @@ service cloud.firestore {
     match /memberships/{memberUid} {
       allow read: if signedIn() && uid() == memberUid;
       allow write: if false;
+    }
+
+    // Histórico do cliente em todas as lojas (consulta de grupo de coleção).
+    // Só lê os próprios pedidos; a consulta precisa filtrar por customerUid.
+    match /{path=**}/orders/{orderId} {
+      allow read: if signedIn() && resource.data.customerUid == uid();
     }
 
     // Perfil pessoal (cliente, lojista ou entregador).
@@ -306,6 +334,43 @@ service cloud.firestore {
           && isStr(d.displayName, 1, 80)
           && (d.phone == null || (d.phone is string && d.phone.matches('^[0-9]{10,11}$')))
           && d.marketingOptIn is bool;
+      }
+
+      // Endereços salvos do cliente, com o ponto no mapa.
+      match /addresses/{addressId} {
+        allow read, delete: if signedIn() && uid() == userId;
+        allow create: if signedIn() && uid() == userId
+          && validAddress(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if signedIn() && uid() == userId
+          && validAddress(incoming())
+          && incoming().createdAt == resource.data.createdAt
+          && incoming().updatedAt == request.time;
+
+        function addressKeys() {
+          return [
+            'label', 'cep', 'street', 'number', 'complement', 'district', 'city', 'state',
+            'location', 'reference', 'createdAt', 'updatedAt'
+          ];
+        }
+
+        function validAddress(d) {
+          return d.keys().hasOnly(addressKeys())
+            && d.keys().hasAll(addressKeys())
+            && isStr(d.label, 1, 30)
+            && d.cep is string && d.cep.matches('^[0-9]{8}$')
+            && isStr(d.street, 1, 200)
+            && isStr(d.number, 1, 20)
+            && isOptStr(d.complement, 100)
+            && isStr(d.district, 1, 100)
+            && isStr(d.city, 1, 100)
+            && d.state is string && d.state.size() == 2
+            && d.location is map
+            && d.location.lat is number && d.location.lat >= -90 && d.location.lat <= 90
+            && d.location.lng is number && d.location.lng >= -180 && d.location.lng <= 180
+            && isOptStr(d.reference, 120);
+        }
       }
     }
 

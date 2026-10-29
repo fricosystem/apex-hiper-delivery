@@ -11,3 +11,7 @@ export * from './models/category';
 export * from './models/product';
 export * from './models/catalog';
 export * from './models/user';
+export * from './geo';
+export * from './cart';
+export * from './models/operation';
+export * from './models/order';
