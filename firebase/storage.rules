@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// Mesmo isolamento do Firestore: arquivos de uma empresa ficam em
+// tenants/{tenantId}/ e só a equipe dela grava.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(tenantId, roles) {
+      return signedIn()
+        && request.auth.token.get('tid', null) == tenantId
+        && request.auth.token.get('role', null) in roles;
+    }
+
+    function maxSizeMb(mb) {
+      return request.resource.size < mb * 1024 * 1024;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    // Fotos de produto e logo: aparecem na loja, então a leitura é pública.
+    match /tenants/{tenantId}/public/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if hasRole(tenantId, ['owner', 'manager']) && isImage() && maxSizeMb(5);
+      allow delete: if hasRole(tenantId, ['owner', 'manager']);
+    }
+
+    // XML de notas, contratos, comprovantes: só perfis com acesso ao financeiro.
+    match /tenants/{tenantId}/private/{allPaths=**} {
+      allow read, delete: if hasRole(tenantId, ['owner', 'manager', 'finance']);
+      allow create, update: if hasRole(tenantId, ['owner', 'manager', 'finance']) && maxSizeMb(20);
+    }
+
+    // Arquivos pessoais (foto de perfil, receita enviada pelo cliente).
+    match /users/{userId}/{allPaths=**} {
+      allow read, delete: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn() && request.auth.uid == userId
+        && (isImage() || request.resource.contentType == 'application/pdf')
+        && maxSizeMb(10);
+    }
+
+    // Qualquer outro caminho: negado.
+  }
+}
