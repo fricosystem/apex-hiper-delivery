@@ -80,7 +80,11 @@ export function Button({
       ) : (
         <View style={styles.row}>
           {icon}
-          <Text variant="bodyStrong" color={palette.fg} style={trailing ? styles.grow : styles.center}>
+          <Text
+            variant="bodyStrong"
+            color={palette.fg}
+            style={trailing ? styles.grow : styles.center}
+          >
             {title}
           </Text>
           {trailing ? (
