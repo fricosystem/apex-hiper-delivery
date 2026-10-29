@@ -71,15 +71,15 @@
       ]
     },
     {
-      "collectionGroup": "catalog",
+      "collectionGroup": "publicStores",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "displayOrder",
+          "fieldPath": "open",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "name",
+          "fieldPath": "tradeName",
           "order": "ASCENDING"
         }
       ]

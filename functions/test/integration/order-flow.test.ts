@@ -159,7 +159,9 @@ describe('pedido do cliente', () => {
   it('recalcula no servidor, cria o pedido e não duplica na nova tentativa', async () => {
     const ana = await customer('ana');
     // Total errado: a Function devolve o valor certo sem criar o pedido.
-    const err = await ana.call('createOrder', orderInput()).catch((e) => e);
+    const err = await ana
+      .call<never>('createOrder', orderInput())
+      .catch((e: { code: string; details: unknown }) => e);
     expect(err.code).toBe('functions/aborted');
     const { totalCents, deliveryFeeCents } = err.details as {
       totalCents: number;
