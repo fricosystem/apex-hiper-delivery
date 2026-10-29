@@ -1,0 +1,22 @@
+{
+  "name": "@hiper/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tipos, schemas e regras de negócio compartilhados entre Functions, painéis e apps.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  }
+}

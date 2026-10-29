@@ -1,0 +1,314 @@
+rules_version = '2';
+
+// Isolamento por empresa: tudo de uma empresa fica em tenants/{tenantId}/...
+// e só é liberado quando o tid do token (custom claim gravado por Cloud
+// Function) é o mesmo do caminho e o perfil (role) tem permissão.
+// Os conjuntos de perfis repetem packages/shared/src/roles.ts.
+// Escritas críticas (empresa, equipe, catálogo público, auditoria) são só
+// do servidor: o Admin SDK das Functions ignora estas regras.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Identidade ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function memberOf(tenantId) {
+      return signedIn() && request.auth.token.get('tid', null) == tenantId;
+    }
+
+    function hasRole(tenantId, roles) {
+      return memberOf(tenantId) && request.auth.token.get('role', null) in roles;
+    }
+
+    function isPlatformStaff() {
+      return signedIn()
+        && request.auth.token.get('staff', null) in ['admin', 'support', 'ops', 'finance'];
+    }
+
+    function allRoles() {
+      return ['owner', 'manager', 'finance', 'hr', 'attendant', 'picker'];
+    }
+
+    function catalogEditors() {
+      return ['owner', 'manager'];
+    }
+
+    function productPausers() {
+      return ['owner', 'manager', 'attendant'];
+    }
+
+    function costAccess() {
+      return ['owner', 'manager', 'finance'];
+    }
+
+    // ---------- Helpers de validação ----------
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function onlyChanges(keys) {
+      return incoming().diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function auditKeys() {
+      return ['createdAt', 'createdBy', 'updatedAt', 'updatedBy'];
+    }
+
+    // Quem criou e quando vêm do próprio pedido, não do app.
+    function stampedCreate() {
+      return incoming().createdBy == uid()
+        && incoming().createdAt == request.time
+        && incoming().updatedBy == uid()
+        && incoming().updatedAt == request.time;
+    }
+
+    function stampedUpdate() {
+      return incoming().updatedBy == uid()
+        && incoming().updatedAt == request.time
+        && incoming().createdBy == resource.data.createdBy
+        && incoming().createdAt == resource.data.createdAt;
+    }
+
+    function isStr(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    function isOptStr(v, max) {
+      return v == null || (v is string && v.size() <= max);
+    }
+
+    function isCents(v) {
+      return v is int && v >= 0 && v <= 1000000000;
+    }
+
+    function isOptCents(v) {
+      return v == null || isCents(v);
+    }
+
+    function isOptNumber(v) {
+      return v == null || v is number;
+    }
+
+    // ---------- Empresa ----------
+
+    match /tenants/{tenantId} {
+      allow read: if memberOf(tenantId) || isPlatformStaff();
+      // Criação, status, plano e endereço da loja só por Function.
+      allow create, delete: if false;
+      allow update: if (
+          (hasRole(tenantId, ['owner', 'manager']) && onlyChanges(tenantProfileKeys()))
+          || (hasRole(tenantId, ['owner']) && onlyChanges(tenantProfileKeys().concat(tenantLegalKeys())))
+        )
+        && incoming().updatedBy == uid()
+        && incoming().updatedAt == request.time
+        && validTenant(tenantId, incoming());
+
+      function tenantProfileKeys() {
+        return ['tradeName', 'phone', 'email', 'address', 'logoPath', 'updatedAt', 'updatedBy'];
+      }
+
+      function tenantLegalKeys() {
+        return ['legalName', 'cnpj', 'stateRegistration', 'taxRegime'];
+      }
+
+      function validTenant(tenantId, d) {
+        return isStr(d.tradeName, 2, 80)
+          && (d.phone == null || (d.phone is string && d.phone.matches('^[0-9]{10,11}$')))
+          && isOptStr(d.email, 200)
+          && (d.address == null || d.address is map)
+          && (d.logoPath == null
+              || (d.logoPath is string && d.logoPath.matches('^tenants/' + tenantId + '/public/.{1,200}$')))
+          && isOptStr(d.legalName, 150)
+          && (d.cnpj == null || (d.cnpj is string && d.cnpj.matches('^[0-9]{14}$')))
+          && isOptStr(d.stateRegistration, 20)
+          && (d.taxRegime == null
+              || d.taxRegime in ['simples_nacional', 'simples_excesso', 'lucro_presumido', 'lucro_real', 'mei']);
+      }
+
+      // Equipe: gravada só pelas Functions addMember e setMemberRole.
+      match /members/{memberUid} {
+        allow read: if hasRole(tenantId, ['owner', 'manager'])
+          || (memberOf(tenantId) && uid() == memberUid);
+        allow write: if false;
+      }
+
+      // ---------- Categorias ----------
+
+      match /categories/{categoryId} {
+        allow read: if hasRole(tenantId, allRoles());
+        allow create: if hasRole(tenantId, catalogEditors()) && validCategory(incoming()) && stampedCreate();
+        allow update: if hasRole(tenantId, catalogEditors()) && validCategory(incoming()) && stampedUpdate();
+        allow delete: if hasRole(tenantId, catalogEditors());
+
+        function validCategory(d) {
+          return d.keys().hasOnly(['name', 'parentId', 'displayOrder', 'active'].concat(auditKeys()))
+            && d.keys().hasAll(['name', 'parentId', 'displayOrder', 'active'].concat(auditKeys()))
+            && isStr(d.name, 1, 60)
+            && (d.parentId == null || (d.parentId is string && d.parentId != categoryId))
+            && d.displayOrder is int && d.displayOrder >= 0
+            && d.active is bool;
+        }
+      }
+
+      // ---------- Produtos (ficha sem custo) ----------
+
+      match /products/{productId} {
+        allow read: if hasRole(tenantId, allRoles());
+        allow create: if hasRole(tenantId, catalogEditors()) && validProduct(incoming()) && stampedCreate();
+        allow update: if (
+            (hasRole(tenantId, catalogEditors()) && validProduct(incoming()))
+            || (hasRole(tenantId, productPausers())
+                && onlyChanges(['paused', 'updatedAt', 'updatedBy'])
+                && incoming().paused is bool)
+          )
+          && stampedUpdate();
+        allow delete: if hasRole(tenantId, catalogEditors());
+
+        function productKeys() {
+          return [
+            'internalCode', 'gtins', 'sku', 'name', 'description', 'brand', 'categoryId',
+            'subcategoryId', 'photos', 'saleUnit', 'optionGroups', 'pricing', 'stock', 'fiscal',
+            'logistics', 'online', 'paused', 'searchKeywords'
+          ].concat(auditKeys());
+        }
+
+        // Validação estrutural; o formato fino (GTIN, NCM, grupos de opções) é
+        // conferido pelo schema compartilhado no painel e na Function do catálogo.
+        function validProduct(d) {
+          return d.keys().hasOnly(productKeys())
+            && d.keys().hasAll(productKeys())
+            && isStr(d.internalCode, 1, 30)
+            && isStr(d.name, 1, 120)
+            && isOptStr(d.description, 2000)
+            && d.gtins is list && d.gtins.size() <= 10
+            && isOptStr(d.sku, 40)
+            && isOptStr(d.brand, 60)
+            && isOptStr(d.categoryId, 128)
+            && isOptStr(d.subcategoryId, 128)
+            && d.photos is list && d.photos.size() <= 10
+            && d.saleUnit in ['un', 'kg', 'g', 'l', 'ml', 'cx', 'fardo', 'pct', 'dz']
+            && d.optionGroups is list && d.optionGroups.size() <= 20
+            && validPricing(d.pricing)
+            && validStock(d.stock)
+            && d.fiscal is map
+            && d.logistics is map
+            && d.online is map && d.online.visible is bool
+            && d.paused is bool
+            && d.searchKeywords is list && d.searchKeywords.size() <= 200;
+        }
+
+        function validPricing(p) {
+          return p is map
+            && p.keys().hasOnly(['salePriceCents', 'promo'])
+            && isCents(p.salePriceCents)
+            && (p.promo == null
+                || (p.promo is map
+                    && isCents(p.promo.priceCents)
+                    && p.promo.priceCents < p.salePriceCents
+                    && p.promo.startsAtMs is int
+                    && p.promo.endsAtMs is int
+                    && p.promo.endsAtMs > p.promo.startsAtMs));
+        }
+
+        function validStock(s) {
+          return s is map
+            && s.tracked is bool
+            && s.quantity is number
+            && isOptNumber(s.min)
+            && isOptNumber(s.max);
+        }
+      }
+
+      // ---------- Custo e fornecedores (separado da ficha) ----------
+
+      match /productCosts/{productId} {
+        allow read: if hasRole(tenantId, costAccess());
+        allow create: if hasRole(tenantId, costAccess())
+          && validCost(incoming())
+          && stampedCreate()
+          && exists(/databases/$(database)/documents/tenants/$(tenantId)/products/$(productId));
+        allow update: if hasRole(tenantId, costAccess()) && validCost(incoming()) && stampedUpdate();
+        allow delete: if hasRole(tenantId, catalogEditors());
+
+        function costKeys() {
+          return [
+            'purchasePriceCents', 'purchaseFreightCents', 'purchaseTaxesCents', 'averageCostCents',
+            'suppliers'
+          ].concat(auditKeys());
+        }
+
+        function validCost(d) {
+          return d.keys().hasOnly(costKeys())
+            && d.keys().hasAll(costKeys())
+            && isCents(d.purchasePriceCents)
+            && isCents(d.purchaseFreightCents)
+            && isCents(d.purchaseTaxesCents)
+            && isOptCents(d.averageCostCents)
+            && d.suppliers is list && d.suppliers.size() <= 20;
+        }
+      }
+
+      // ---------- Vitrine pública ----------
+
+      // Gerada pela Function syncCatalog, sem dados internos.
+      match /catalog/{productId} {
+        allow read: if true;
+        allow write: if false;
+      }
+
+      // Registro de quem fez o quê, gravado pelas Functions.
+      match /auditLog/{entryId} {
+        allow read: if hasRole(tenantId, ['owner']);
+        allow write: if false;
+      }
+    }
+
+    // ---------- Fora das empresas ----------
+
+    // Endereço público da loja → empresa. Gravado só por Function.
+    match /publicStores/{slug} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Vínculo usuário → empresa, fonte da verdade dos claims. Só Functions gravam.
+    match /memberships/{memberUid} {
+      allow read: if signedIn() && uid() == memberUid;
+      allow write: if false;
+    }
+
+    // Perfil pessoal (cliente, lojista ou entregador).
+    match /users/{userId} {
+      allow read: if signedIn() && uid() == userId;
+      allow create: if signedIn() && uid() == userId
+        && validUser(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if signedIn() && uid() == userId
+        && validUser(incoming())
+        && incoming().createdAt == resource.data.createdAt
+        && incoming().updatedAt == request.time;
+      // Exclusão da conta passa por Function (apaga dados ligados à conta).
+      allow delete: if false;
+
+      function validUser(d) {
+        return d.keys().hasOnly(['displayName', 'phone', 'marketingOptIn', 'createdAt', 'updatedAt'])
+          && d.keys().hasAll(['displayName', 'phone', 'marketingOptIn', 'createdAt', 'updatedAt'])
+          && isStr(d.displayName, 1, 80)
+          && (d.phone == null || (d.phone is string && d.phone.matches('^[0-9]{10,11}$')))
+          && d.marketingOptIn is bool;
+      }
+    }
+
+    // Qualquer outro caminho: negado.
+  }
+}

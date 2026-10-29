@@ -1,0 +1,32 @@
+{
+  "name": "hiper-delivery",
+  "private": true,
+  "description": "Hiper Delivery: delivery próprio para comércios + rede aberta de entregadores.",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:rules": "pnpm --filter @hiper/firebase test:rules",
+    "test:integration": "pnpm --filter @hiper/functions build && pnpm --filter @hiper/functions test:integration",
+    "emulators": "pnpm --filter @hiper/functions build && firebase emulators:start --import=.emulator-data --export-on-exit=.emulator-data",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:all": "pnpm test && pnpm test:rules && pnpm test:integration"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.34.2",
+    "prettier": "^3.6.2",
+    "turbo": "^2.11.10",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "protobufjs"
+    ]
+  }
+}

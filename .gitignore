@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.turbo/
+*.log
+.env*
+!.env.example
+.emulator-data/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+pubsub-debug.log*
+.firebase/
+coverage/
+.DS_Store
